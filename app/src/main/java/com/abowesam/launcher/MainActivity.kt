@@ -1,15 +1,15 @@
 package com.abowesam.launcher
 
 import android.app.Activity
-import android.app.WallpaperManager
-import android.content.ClipData
+import android.app.AlertDialog
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
 import android.graphics.Typeface
+import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
+import android.os.Build
 import android.os.Bundle
-import android.view.DragEvent
 import android.view.Gravity
 import android.view.View
 import android.view.WindowInsets
@@ -25,16 +25,20 @@ class MainActivity : Activity() {
     private lateinit var root: LinearLayout
     private lateinit var grid: GridLayout
     private lateinit var search: EditText
+    private lateinit var pageLabel: TextView
     private var apps: List<LaunchApp> = emptyList()
     private var drawerOpen = false
+    private var currentPage = 0
     private val accent = Color.rgb(255, 190, 92)
+    private val prefs by lazy { getSharedPreferences("launcher_settings", MODE_PRIVATE) }
 
-    data class LaunchApp(val label: String, val packageName: String, val icon: android.graphics.drawable.Drawable)
+    data class LaunchApp(val label: String, val packageName: String, val icon: Drawable)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.statusBarColor = Color.rgb(15, 20, 36)
         window.navigationBarColor = Color.rgb(12, 16, 29)
+        window.decorView.systemUiVisibility = 0
         buildHome()
         loadApps()
     }
@@ -63,24 +67,29 @@ class MainActivity : Activity() {
             )
         }
         setContentView(root)
-        root.setOnApplyWindowInsetsListener { view, insets ->
-            val bars = insets.getInsets(WindowInsets.Type.systemBars())
-            view.setPadding(dp(18), bars.top + dp(10), dp(18), bars.bottom + dp(10))
-            insets
+        if (Build.VERSION.SDK_INT >= 30) {
+            root.setOnApplyWindowInsetsListener { view, insets ->
+                val bars = insets.getInsets(WindowInsets.Type.systemBars())
+                view.setPadding(dp(18), bars.top + dp(10), dp(18), bars.bottom + dp(10))
+                insets
+            }
+        } else {
+            @Suppress("DEPRECATION")
+            root.setPadding(dp(18), dp(30), dp(18), dp(12))
         }
 
         val header = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
         header.addView(label("أبو وسام", 26f, Color.WHITE, true), LinearLayout.LayoutParams(0, dp(52), 1f))
         header.addView(label("3D SHELL", 12f, accent, true))
         root.addView(header)
-        root.addView(label("اسحب، افتح، واكتشف تطبيقاتك", 13f, 0xFFD4D8E2.toInt()).apply {
+        root.addView(label("مساحتك الرئيسية • خصّص تطبيقاتك", 13f, 0xFFD4D8E2.toInt()).apply {
             gravity = Gravity.START
-            setPadding(0, dp(2), 0, dp(16))
+            setPadding(0, dp(2), 0, dp(12))
         })
 
-        val info = label("واجهة ثلاثية الأبعاد قيد التطوير", 14f, Color.WHITE)
+        val info = label("اسحب بين الصفحات واختر تطبيقاتك المفضلة", 13f, Color.WHITE)
         info.background = panel(dp(22).toFloat(), 0x332FFFFFF)
-        root.addView(info, LinearLayout.LayoutParams(-1, dp(54)).apply { bottomMargin = dp(14) })
+        root.addView(info, LinearLayout.LayoutParams(-1, dp(48)).apply { bottomMargin = dp(10) })
 
         search = EditText(this).apply {
             hint = "ابحث عن تطبيق..."
@@ -106,6 +115,16 @@ class MainActivity : Activity() {
         scroll.addView(grid)
         root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
 
+        val pageBar = LinearLayout(this).apply {
+            gravity = Gravity.CENTER
+            setPadding(0, dp(5), 0, dp(5))
+        }
+        pageBar.addView(dockItem("السابق", "‹") { changePage(-1) }, LinearLayout.LayoutParams(0, dp(42), 1f))
+        pageLabel = label("1 / 3", 12f, Color.WHITE, true)
+        pageBar.addView(pageLabel, LinearLayout.LayoutParams(0, dp(42), 1f))
+        pageBar.addView(dockItem("التالي", "›") { changePage(1) }, LinearLayout.LayoutParams(0, dp(42), 1f))
+        root.addView(pageBar)
+
         val dock = LinearLayout(this).apply {
             gravity = Gravity.CENTER
             background = panel(dp(25).toFloat(), 0x44FFFFFF)
@@ -113,26 +132,39 @@ class MainActivity : Activity() {
         }
         dock.addView(dockItem("التطبيقات", "▦") { toggleDrawer() }, LinearLayout.LayoutParams(0, dp(68), 1f))
         dock.addView(dockItem("الخلفية", "◈") { chooseWallpaper() }, LinearLayout.LayoutParams(0, dp(68), 1f))
-        dock.addView(dockItem("تحديث", "↻") { loadApps(); Toast.makeText(this, "تم تحديث التطبيقات", Toast.LENGTH_SHORT).show() }, LinearLayout.LayoutParams(0, dp(68), 1f))
-        root.addView(dock, LinearLayout.LayoutParams(-1, dp(80)).apply { topMargin = dp(10) })
+        dock.addView(dockItem("الإعدادات", "⚙") { showSettings() }, LinearLayout.LayoutParams(0, dp(68), 1f))
+        dock.addView(dockItem("تحديث", "↻") { loadApps(); toast("تم تحديث قائمة التطبيقات") }, LinearLayout.LayoutParams(0, dp(68), 1f))
+        root.addView(dock, LinearLayout.LayoutParams(-1, dp(80)).apply { topMargin = dp(6) })
     }
 
     private fun dockItem(title: String, symbol: String, action: () -> Unit): View =
         LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
-            addView(label(symbol, 26f, accent, true))
-            addView(label(title, 11f, Color.WHITE))
+            addView(label(symbol, 24f, accent, true))
+            addView(label(title, 10f, Color.WHITE))
             setOnClickListener { action() }
         }
+
+    private fun toast(message: String) = Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
+
+    private fun homePackages(page: Int): MutableSet<String> =
+        prefs.getStringSet("home_page_$page", emptySet())?.toMutableSet() ?: mutableSetOf()
+
+    private fun saveHomePackages(page: Int, values: Set<String>) {
+        prefs.edit().putStringSet("home_page_$page", values.toSet()).apply()
+    }
 
     private fun loadApps() {
         val query = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
         apps = packageManager.queryIntentActivities(query, PackageManager.MATCH_ALL)
             .mapNotNull { item ->
                 val activityInfo = item.activityInfo ?: return@mapNotNull null
-                LaunchApp(item.loadLabel(packageManager)?.toString() ?: activityInfo.packageName,
-                    activityInfo.packageName, item.loadIcon(packageManager))
+                LaunchApp(
+                    item.loadLabel(packageManager)?.toString() ?: activityInfo.packageName,
+                    activityInfo.packageName,
+                    item.loadIcon(packageManager)
+                )
             }
             .distinctBy { it.packageName }
             .sortedBy { it.label.lowercase() }
@@ -141,17 +173,27 @@ class MainActivity : Activity() {
 
     private fun renderHome() {
         grid.removeAllViews()
-        apps.take(12).forEach { grid.addView(appTile(it)) }
+        pageLabel.text = "${currentPage + 1} / 3"
+        val selected = homePackages(currentPage)
+        val visible = if (selected.isEmpty() && currentPage == 0) apps.take(12)
+            else apps.filter { selected.contains(it.packageName) }
+        visible.forEach { grid.addView(appTile(it, false)) }
+        if (visible.isEmpty()) {
+            val hint = label("هذه الصفحة فارغة\nافتح التطبيقات واضغط مطولاً لإضافة تطبيق", 14f, 0xFFE4E8F0.toInt())
+            grid.addView(hint, GridLayout.LayoutParams().apply {
+                width = dp(280); height = dp(110); columnSpec = GridLayout.spec(0, 4)
+            })
+        }
     }
 
     private fun renderApps(filter: String = "") {
         if (!drawerOpen) return
         grid.removeAllViews()
         apps.filter { it.label.contains(filter, true) || it.packageName.contains(filter, true) }
-            .forEach { grid.addView(appTile(it)) }
+            .forEach { grid.addView(appTile(it, true)) }
     }
 
-    private fun appTile(app: LaunchApp): View {
+    private fun appTile(app: LaunchApp, inDrawer: Boolean): View {
         val tile = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
@@ -165,15 +207,34 @@ class MainActivity : Activity() {
         tile.addView(label(app.label, 11f, Color.WHITE).apply { maxLines = 2 })
         tile.setOnClickListener { openApp(app) }
         tile.setOnLongClickListener {
-            val clip = ClipData.newPlainText("application", app.packageName)
-            tile.startDragAndDrop(clip, View.DragShadowBuilder(tile), app.packageName, 0)
+            val options = if (inDrawer) arrayOf("إضافة إلى الصفحة الحالية", "إضافة إلى المفضلة")
+                else arrayOf("إزالة من الصفحة الرئيسية", "نقل إلى الصفحة التالية")
+            AlertDialog.Builder(this)
+                .setTitle(app.label)
+                .setItems(options) { _, which ->
+                    if (inDrawer) {
+                        val chosen = homePackages(currentPage)
+                        chosen.add(app.packageName)
+                        saveHomePackages(currentPage, chosen)
+                        toast("أُضيف التطبيق إلى الصفحة ${currentPage + 1}")
+                        toggleDrawer()
+                    } else if (which == 0) {
+                        val chosen = homePackages(currentPage)
+                        chosen.remove(app.packageName)
+                        saveHomePackages(currentPage, chosen)
+                        renderHome()
+                    } else {
+                        val chosen = homePackages(currentPage)
+                        chosen.remove(app.packageName)
+                        saveHomePackages(currentPage, chosen)
+                        val next = (currentPage + 1) % 3
+                        val target = homePackages(next)
+                        target.add(app.packageName)
+                        saveHomePackages(next, target)
+                        renderHome()
+                    }
+                }.show()
             true
-        }
-        tile.setOnDragListener { _, event ->
-            event.action == DragEvent.ACTION_DRAG_STARTED ||
-                event.action == DragEvent.ACTION_DRAG_ENTERED ||
-                event.action == DragEvent.ACTION_DRAG_EXITED ||
-                event.action == DragEvent.ACTION_DROP
         }
         tile.layoutParams = GridLayout.LayoutParams().apply {
             width = 0
@@ -187,10 +248,10 @@ class MainActivity : Activity() {
     private fun openApp(app: LaunchApp) {
         try {
             val intent = packageManager.getLaunchIntentForPackage(app.packageName)
-            if (intent == null) Toast.makeText(this, "لا يوجد اختصار تشغيل لهذا التطبيق", Toast.LENGTH_SHORT).show()
+            if (intent == null) toast("لا يوجد اختصار تشغيل لهذا التطبيق")
             else startActivity(intent)
         } catch (_: Exception) {
-            Toast.makeText(this, "تعذر فتح التطبيق", Toast.LENGTH_SHORT).show()
+            toast("تعذر فتح التطبيق")
         }
     }
 
@@ -200,16 +261,38 @@ class MainActivity : Activity() {
         if (drawerOpen) renderApps() else renderHome()
     }
 
+    private fun changePage(delta: Int) {
+        if (drawerOpen) return
+        currentPage = (currentPage + delta + 3) % 3
+        renderHome()
+    }
+
     private fun chooseWallpaper() {
         try {
-            startActivity(Intent(Intent.ACTION_ATTACH_DATA).apply {
-                type = "image/*"
-                addCategory(Intent.CATEGORY_DEFAULT)
-            })
+            startActivity(Intent(Intent.ACTION_SET_WALLPAPER))
         } catch (_: Exception) {
-            try { startActivity(Intent(WallpaperManager.ACTION_LIVE_WALLPAPER_CHOOSER)) }
-            catch (_: Exception) { Toast.makeText(this, "غيّر الخلفية من إعدادات الهاتف", Toast.LENGTH_SHORT).show() }
+            toast("غيّر الخلفية من إعدادات الهاتف")
         }
+    }
+
+    private fun showSettings() {
+        val choices = arrayOf("إعادة ضبط الصفحات الرئيسية", "معلومات عن التطبيق")
+        AlertDialog.Builder(this)
+            .setTitle("إعدادات أبو وسام")
+            .setItems(choices) { _, which ->
+                if (which == 0) {
+                    prefs.edit().clear().apply()
+                    currentPage = 0
+                    renderHome()
+                    toast("تمت إعادة ضبط الصفحات")
+                } else {
+                    AlertDialog.Builder(this)
+                        .setTitle("أبو وسام لانشر")
+                        .setMessage("الإصدار 0.2.0\nلانشر أندرويد قيد التطوير، يدعم فتح التطبيقات والبحث وثلاث صفحات رئيسية قابلة للتخصيص.")
+                        .setPositiveButton("حسناً", null)
+                        .show()
+                }
+            }.show()
     }
 
     @Deprecated("Legacy back callback retained for Android 16 compatibility setting")
