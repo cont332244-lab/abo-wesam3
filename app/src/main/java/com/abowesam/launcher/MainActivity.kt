@@ -149,7 +149,7 @@ class MainActivity : Activity() {
             setHintTextColor(muted)
             setTextColor(Color.WHITE)
             textSize = 14f
-            singleLine = true
+            isSingleLine = true
             background = panel(dp(17).toFloat(), 0x22FFFFFF)
             setPadding(dp(14), 0, dp(14), 0)
             visibility = View.GONE
